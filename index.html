@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wasserzeichen-Tool</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 16px; }
+h1 { text-align: center; margin-bottom: 20px; font-size: 1.5rem; color: #e94560; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 16px; }
+.upload-box { background: #16213e; border: 2px dashed #e94560; border-radius: 10px; padding: 14px 20px; text-align: center; min-width: 200px; }
+.upload-box .icon { font-size: 1.8rem; display: block; margin-bottom: 4px; }
+.upload-box p { font-size: 0.8rem; color: #aaa; margin-bottom: 8px; }
+.upload-btn { background: #e94560; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; }
+.status-ok { color: #4caf50; font-size: 0.78rem; margin-top: 5px; }
+.slider-group { background: #16213e; border-radius: 10px; padding: 12px 18px; min-width: 200px; }
+.lbl { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px; color: #aaa; }
+.lbl span { color: #e94560; font-weight: bold; }
+input[type="range"] { width: 100%; accent-color: #e94560; }
+.canvas-container { text-align: center; margin-bottom: 16px; overflow-x: auto; }
+#mainCanvas { display: block; max-width: 100%; background: #111; border-radius: 8px; margin: 0 auto; touch-action: none; }
+#hint { text-align: center; color: #777; font-size: 0.8rem; margin-top: 6px; }
+.btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+button { background: #e94560; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; }
+button.sec { background: #0f3460; }
+#iosOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; align-items: center; justify-content: center; padding: 16px; }
+#iosOverlay.show { display: flex; }
+#iosBox { background: #16213e; border-radius: 14px; padding: 22px; max-width: 380px; width: 100%; text-align: center; }
+#iosBox h2 { color: #e94560; margin-bottom: 12px; font-size: 1.05rem; }
+.steps { text-align: left; background: #0f3460; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; }
+.steps li { font-size: 0.88rem; color: #ddd; margin-bottom: 7px; list-style: none; line-height: 1.5; }
+.steps li strong { color: #e94560; }
+#openImgBtn { background: #e94560; color: #fff; border: none; border-radius: 8px; padding: 11px; font-size: 0.95rem; cursor: pointer; width: 100%; margin-bottom: 10px; }
+#closeOverlay { background: #0f3460; width: 100%; }
+</style>
+</head>
+<body>
+<h1>🖼️ Wasserzeichen-Tool</h1>
+<div class="controls">
+  <div class="upload-box">
+    <span class="icon">📷</span>
+    <p>Hintergrundbild</p>
+    <button class="upload-btn" onclick="document.getElementById('bgFile').click()">Bild wählen</button>
+    <input type="file" id="bgFile" accept="image/*" style="display:none">
+    <div id="bgStatus"></div>
+  </div>
+  <div class="upload-box">
+    <span class="icon">💧</span>
+    <p>Wasserzeichen</p>
+    <button class="upload-btn" onclick="document.getElementById('wmFile').click()">Wasserzeichen wählen</button>
+    <input type="file" id="wmFile" accept="image/*" style="display:none">
+    <div id="wmStatus"></div>
+  </div>
+  <div class="slider-group">
+    <div class="lbl">Größe <span id="sizeVal">30%</span></div>
+    <input type="range" id="sizeSlider" min="5" max="100" value="30">
+    <div class="lbl" style="margin-top:10px;">Opazität <span id="opacVal">80%</span></div>
+    <input type="range" id="opacSlider" min="5" max="100" value="80">
+  </div>
+</div>
+<div class="canvas-container">
+  <canvas id="mainCanvas" width="800" height="500"></canvas>
+  <div id="hint">⬆️ Bitte zuerst ein Bild hochladen</div>
+</div>
+<div class="btn-row">
+  <button class="sec" id="resetBtn">🔄 Zurücksetzen</button>
+  <button id="downloadBtn">⬇️ Bild speichern</button>
+</div>
+<div id="iosOverlay">
+  <div id="iosBox">
+    <h2>📱 Bild auf iPhone speichern</h2>
+    <ol class="steps">
+      <li>1️⃣ Tippe auf <strong>„Bild in neuem Tab öffnen"</strong></li>
+      <li>2️⃣ Warte bis das Bild geladen ist</li>
+      <li>3️⃣ Tippe auf das <strong>Teilen-Symbol ⬆️</strong> unten in Safari</li>
+      <li>4️⃣ Wähle <strong>„Bild sichern"</strong></li>
+    </ol>
+    <button id="openImgBtn">🔗 Bild in neuem Tab öffnen</button>
+    <button id="closeOverlay" class="sec">✕ Schließen</button>
+  </div>
+</div>
+<script>
+const canvas=document.getElementById('mainCanvas'),ctx=canvas.getContext('2d');
+let bgImg=null,wmImg=null,wmX=50,wmY=50,wmW=0,wmH=0;
+let drag=false,resize=false,dox=0,doy=0,opacity=0.8,sizePct=30,exportURL='';
+
+function isIOS(){return /iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);}
+
+function loadImg(file,cb){
+  const r=new FileReader();
+  r.onload=e=>{const i=new Image();i.onload=()=>cb(i);i.src=e.target.result;};
+  r.readAsDataURL(file);
+}
+
+document.getElementById('bgFile').addEventListener('change',function(){
+  const f=this.files[0];if(!f)return;
+  loadImg(f,img=>{bgImg=img;canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;calcWm();render();
+    document.getElementById('bgStatus').innerHTML='<div class="status-ok">✅ '+f.name+'</div>';hint();});
+});
+document.getElementById('wmFile').addEventListener('change',function(){
+  const f=this.files[0];if(!f)return;
+  loadImg(f,img=>{wmImg=img;wmX=50;wmY=50;calcWm();render();
+    document.getElementById('wmStatus').innerHTML='<div class="status-ok">✅ '+f.name+'</div>';hint();});
+});
+
+function hint(){
+  document.getElementById('hint').textContent=
+    bgImg&&wmImg?'🖱️ Wasserzeichen ziehen | Roter Anfasser = Größe ändern':
+    bgImg?'⬆️ Jetzt Wasserzeichen hochladen':'⬆️ Bitte zuerst ein Bild hochladen';
+}
+
+function calcWm(){
+  if(!bgImg||!wmImg)return;
+  wmW=bgImg.naturalWidth*(sizePct/100);
+  wmH=wmW*(wmImg.naturalHeight/wmImg.naturalWidth);
+}
+
+function renderClean(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(bgImg)ctx.drawImage(bgImg,0,0);
+  if(wmImg){ctx.globalAlpha=opacity;ctx.drawImage(wmImg,wmX,wmY,wmW,wmH);ctx.globalAlpha=1;}
+}
+
+function render(){
+  renderClean();
+  if(wmImg){
+    ctx.strokeStyle='rgba(233,69,96,0.9)';ctx.lineWidth=Math.max(1,canvas.width/400);
+    ctx.setLineDash([6,3]);ctx.strokeRect(wmX,wmY,wmW,wmH);ctx.setLineDash([]);
+    ctx.fillStyle='#e94560';ctx.fillRect(wmX+wmW-6,wmY+wmH-6,12,12);
+  }
+}
+
+document.getElementById('sizeSlider').addEventListener('input',function(){
+  sizePct=+this.value;document.getElementById('sizeVal').textContent=sizePct+'%';calcWm();render();
+});
+document.getElementById('opacSlider').addEventListener('input',function(){
+  opacity=+this.value/100;document.getElementById('opacVal').textContent=this.value+'%';render();
+});
+
+function getPos(e){
+  const r=canvas.getBoundingClientRect(),sx=canvas.width/r.width,sy=canvas.height/r.height;
+  const cx=e.touches?e.touches[0].clientX:e.clientX,cy=e.touches?e.touches[0].clientY:e.clientY;
+  return{x:(cx-r.left)*sx,y:(cy-r.top)*sy};
+}
+function onH(x,y){return x>=wmX+wmW-16&&x<=wmX+wmW+4&&y>=wmY+wmH-16&&y<=wmY+wmH+4;}
+function onW(x,y){return x>=wmX&&x<=wmX+wmW&&y>=wmY&&y<=wmY+wmH;}
+
+function startEvent(e){
+  if(!wmImg)return;const p=getPos(e);
+  if(onH(p.x,p.y))resize=true;
+  else if(onW(p.x,p.y)){drag=true;dox=p.x-wmX;doy=p.y-wmY;}
+}
+function moveEvent(e){
+  if(!wmImg)return;const p=getPos(e);
+  if(resize){
+    wmW=Math.max(20,p.x-wmX);wmH=wmW*(wmImg.naturalHeight/wmImg.naturalWidth);
+    sizePct=Math.round(wmW/bgImg.width*100);
+    const s=document.getElementById('sizeSlider');s.value=Math.min(100,Math.max(5,sizePct));
+    document.getElementById('sizeVal').textContent=s.value+'%';render();
+  }else if(drag){wmX=p.x-dox;wmY=p.y-doy;render();}
+  else canvas.style.cursor=onH(p.x,p.y)?'se-resize':onW(p.x,p.y)?'move':'default';
+}
+function endEvent(){drag=false;resize=false;}
+
+canvas.addEventListener('mousedown',startEvent);
+canvas.addEventListener('mousemove',moveEvent);
+canvas.addEventListener('mouseup',endEvent);
+canvas.addEventListener('mouseleave',endEvent);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();startEvent(e);},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();moveEvent(e);},{passive:false});
+canvas.addEventListener('touchend',endEvent);
+
+document.getElementById('resetBtn').addEventListener('click',function(){
+  if(!bgImg||!wmImg)return;
+  wmX=50;wmY=50;sizePct=30;opacity=0.8;
+  document.getElementById('sizeSlider').value=30;document.getElementById('sizeVal').textContent='30%';
+  document.getElementById('opacSlider').value=80;document.getElementById('opacVal').textContent='80%';
+  calcWm();render();
+});
+
+document.getElementById('downloadBtn').addEventListener('click',function(){
+  if(!bgImg){alert('Bitte erst ein Bild hochladen.');return;}
+  renderClean();exportURL=canvas.toDataURL('image/jpeg',0.95);render();
+  if(isIOS()){document.getElementById('iosOverlay').classList.add('show');}
+  else{const a=document.createElement('a');a.download='wasserzeichen.jpg';a.href=exportURL;a.click();}
+});
+
+document.getElementById('openImgBtn').addEventListener('click',function(){
+  const w=window.open();
+  w.document.write('<html><head><title>Bild sichern</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh}img{max-width:100%;max-height:100vh}</style></head><body><img src="'+exportURL+'"></body></html>');
+  w.document.close();
+});
+document.getElementById('closeOverlay').addEventListener('click',()=>document.getElementById('iosOverlay').classList.remove('show'));
+document.getElementById('iosOverlay').addEventListener('click',function(e){if(e.target===this)this.classList.remove('show');});
+</script>
+</body>
+</html>
